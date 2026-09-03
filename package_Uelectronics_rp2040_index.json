@@ -12,7 +12,7 @@
         {
           "category": "UNIT Electronics",
           "name": "UNIT Electronics RP2040/RP2350",
-          "url": "https://github.com/ARabadann/Uelectronics-RP2040-Arduino-Package/releases/download/v3.0.0/Uelectronics-rp2040_rp2350-3.0.0.zip",
+          "url": "https://github.com/UNIT-Electronics/Uelectronics-RP2040-Arduino-Package/releases/download/v3.0.0/Uelectronics-rp2040_rp2350-3.0.0.zip",
           "version": "3.0.0",
           "architecture": "rp2040",
           "archiveFileName": "Uelectronics-rp2040_rp2350-3.0.0.zip",
