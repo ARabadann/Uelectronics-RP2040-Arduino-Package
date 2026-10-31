@@ -105,7 +105,7 @@
 //   Isochronous IN endpoint
 //
 
-#define CFG_TUD_AUDIO_FUNC_1_SAMPLE_RATE              (48000)
+#define CFG_TUD_AUDIO_FUNC_1_SAMPLE_RATE              (24000)
 
 #define CFG_TUD_AUDIO_ENABLE_EP_IN                    (1)
 

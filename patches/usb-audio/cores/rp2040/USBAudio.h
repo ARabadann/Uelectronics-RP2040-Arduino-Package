@@ -22,8 +22,6 @@ public:
 
     void begin();
 
-    void debugReport();
-
 
     // --------------------------------------------------------
     // USB State
@@ -44,12 +42,8 @@ public:
 
 
     // --------------------------------------------------------
-    // DEBUG
+    // USB resources assigned by the Arduino-Pico core
     // --------------------------------------------------------
-    //
-    // Temporary accessors used to verify that the Audio
-    // interface is registered before USB initialization.
-    //
 
     uint8_t interfaceID() const {
         return _interfaceID;

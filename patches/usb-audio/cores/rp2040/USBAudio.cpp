@@ -3,7 +3,9 @@
 #if !defined(USE_TINYUSB) && !defined(NO_USB)
 
 #include "USB.h"
+#include "CoreMutex.h"
 #include <tusb.h>
+#include <hardware/structs/usb_dpram.h>
 #include <cstring>
 
 // ============================================================
@@ -35,89 +37,10 @@ USBAudioClass USBAudio;
 // USB Audio Runtime State
 // ============================================================
 
-static uint32_t usbAudioSampleRate = 48000;
+// Single source of truth: tusb_config.h
+static uint32_t usbAudioSampleRate = CFG_TUD_AUDIO_FUNC_1_SAMPLE_RATE;
 static bool usbAudioMute = false;
 static int16_t usbAudioVolume = 0;
-
-static volatile uint32_t dbgGetCount = 0;
-static volatile uint32_t dbgSetCount = 0;
-static volatile uint32_t dbgSetItfCount = 0;
-
-static volatile uint8_t dbgGetEntity = 0;
-static volatile uint8_t dbgGetControl = 0;
-static volatile uint8_t dbgGetChannel = 0;
-static volatile uint8_t dbgGetRequest = 0;
-
-static volatile uint8_t dbgSetEntity = 0;
-static volatile uint8_t dbgSetControl = 0;
-static volatile uint8_t dbgSetRequest = 0;
-
-static volatile uint8_t dbgItf = 0;
-static volatile uint8_t dbgAlt = 0;
-
-static volatile uint32_t dbgTxDoneCount = 0;
-static volatile uint32_t dbgTxBytes = 0;
-static volatile uint8_t dbgTxEndpoint = 0;
-static volatile uint8_t dbgTxAlt = 0;
-
-static volatile uint32_t dbgTxPreCount = 0;
-static volatile uint8_t dbgTxPreEndpoint = 0;
-static volatile uint8_t dbgTxPreAlt = 0;
-
-// ============================================================
-// TinyUSB core internal diagnostics
-// ============================================================
-
-extern "C" {
-    extern volatile uint32_t usb_audio_dbg_tx_entry;
-    extern volatile uint32_t usb_audio_dbg_as_fail;
-    extern volatile uint32_t usb_audio_dbg_alt_zero;
-    extern volatile uint32_t usb_audio_dbg_pre_reached;
-
-    extern volatile uint8_t usb_audio_dbg_ep_in_as_itf;
-    extern volatile uint8_t usb_audio_dbg_idx_itf;
-    extern volatile uint8_t usb_audio_dbg_alt_value;
-    extern volatile uint8_t usb_audio_dbg_ep_in;
-
-    extern volatile uint32_t usb_audio_dbg_ep_seen;
-    extern volatile uint32_t usb_audio_dbg_ep_in_match;
-
-    extern volatile uint8_t usb_audio_dbg_seen_ep_addr;
-    extern volatile uint8_t usb_audio_dbg_seen_ep_dir;
-    extern volatile uint8_t usb_audio_dbg_seen_ep_usage;
-    extern volatile uint8_t usb_audio_dbg_seen_ep_attr;
-    extern volatile uint16_t usb_audio_dbg_seen_ep_size;
-
-    extern volatile uint32_t usb_audio_dbg_itf_match;
-    extern volatile uint8_t usb_audio_dbg_req_itf;
-    extern volatile uint8_t usb_audio_dbg_req_alt;
-    extern volatile uint8_t usb_audio_dbg_matched_eps;
-    extern volatile uint8_t usb_audio_dbg_found_eps;
-    extern volatile uint32_t usb_audio_dbg_alt1_match;
-    extern volatile uint8_t usb_audio_dbg_alt1_itf;
-    extern volatile uint8_t usb_audio_dbg_alt1_n_eps;
-    extern volatile uint8_t usb_audio_dbg_alt1_found_eps;
-
-    extern volatile uint32_t usb_audio_dbg_setitf_entry;
-
-    extern volatile uint32_t usb_audio_dbg_alt1_request;
-    extern volatile uint8_t usb_audio_dbg_alt1_request_itf;
-
-    extern volatile uint32_t usb_audio_dbg_alt1_lookup_ok;
-    extern volatile uint32_t usb_audio_dbg_alt1_lookup_fail;
-
-    extern volatile uint32_t usb_audio_dbg_iso_alloc_count;
-    extern volatile uint8_t  usb_audio_dbg_iso_alloc_ep;
-    extern volatile uint16_t usb_audio_dbg_iso_alloc_size;
-
-    extern volatile uint32_t usb_audio_dbg_iso_activate_count;
-    extern volatile uint8_t  usb_audio_dbg_iso_activate_ep;
-    extern volatile uint16_t usb_audio_dbg_iso_activate_size;
-
-    extern volatile uint32_t usb_audio_dbg_dcd_xfer_count;
-    extern volatile uint8_t  usb_audio_dbg_dcd_xfer_ep;
-    extern volatile uint16_t usb_audio_dbg_dcd_xfer_size;
-}
 
 
 // ============================================================
@@ -130,21 +53,10 @@ USBAudioClass::USBAudioClass()
       _stringID(0) {
 
     // --------------------------------------------------------
-    // DEBUG PRODUCT NAME
-    // --------------------------------------------------------
-    //
-    // This is intentionally done in the constructor.
-    //
     // The constructor runs during static initialization,
-    // before setup().
-    //
-    // Therefore the product string should already be defined
-    // when the Arduino-Pico USB core builds its descriptors.
-    //
-
-    USB.setProduct(
-        "UNIT Pulsar RP2350A AUDIO TEST"
-    );
+    // before setup(), so the interface is registered before
+    // the Arduino-Pico USB core builds its descriptors.
+    // --------------------------------------------------------
 
 
     // --------------------------------------------------------
@@ -292,281 +204,6 @@ bool USBAudioClass::ready() {
     return tud_mounted();
 }
 
-// ============================================================
-// Debug report
-// ============================================================
-
-void USBAudioClass::debugReport() {
-
-    static uint32_t oldGetCount = 0;
-    static uint32_t oldSetCount = 0;
-    static uint32_t oldItfCount = 0;
-
-    static uint32_t lastAlive = 0;
-
-    static uint32_t lastTxReport = 0;
-    static uint32_t previousTxCount = 0;
-    static uint32_t previousTxBytes = 0;
-
-    // --------------------------------------------------------
-    // Alive message
-    // --------------------------------------------------------
-
-    if (millis() - lastAlive >= 2000) {
-
-        lastAlive = millis();
-
-        Serial.println(
-            "USBAudio debugReport alive"
-        );
-    }
-
-
-    // --------------------------------------------------------
-    // Read debug counters
-    // --------------------------------------------------------
-
-    const uint32_t getCount =
-        dbgGetCount;
-
-    const uint32_t setCount =
-        dbgSetCount;
-
-    const uint32_t itfCount =
-        dbgSetItfCount;
-
-
-    // --------------------------------------------------------
-    // GET requests
-    // --------------------------------------------------------
-
-    if (getCount != oldGetCount) {
-
-        oldGetCount = getCount;
-
-        Serial.print("USB AUDIO GET #");
-        Serial.print(getCount);
-
-        Serial.print(" entity=");
-        Serial.print(dbgGetEntity);
-
-        Serial.print(" ctrl=");
-        Serial.print(dbgGetControl);
-
-        Serial.print(" ch=");
-        Serial.print(dbgGetChannel);
-
-        Serial.print(" req=");
-        Serial.println(dbgGetRequest);
-    }
-
-
-    // --------------------------------------------------------
-    // SET requests
-    // --------------------------------------------------------
-
-    if (setCount != oldSetCount) {
-
-        oldSetCount = setCount;
-
-        Serial.print("USB AUDIO SET #");
-        Serial.print(setCount);
-
-        Serial.print(" entity=");
-        Serial.print(dbgSetEntity);
-
-        Serial.print(" ctrl=");
-        Serial.print(dbgSetControl);
-
-        Serial.print(" req=");
-        Serial.println(dbgSetRequest);
-    }
-
-
-    // --------------------------------------------------------
-    // SET_INTERFACE
-    // --------------------------------------------------------
-
-    if (itfCount != oldItfCount) {
-
-        oldItfCount = itfCount;
-
-        Serial.print(
-            "USB AUDIO SET_INTERFACE #"
-        );
-
-        Serial.print(itfCount);
-
-        Serial.print(" itf=");
-        Serial.print(dbgItf);
-
-        Serial.print(" alt=");
-        Serial.println(dbgAlt);
-    }
-
-
-    // --------------------------------------------------------
-    // Audio IN transfer statistics
-    // --------------------------------------------------------
-
-    if (millis() - lastTxReport >= 1000) {
-
-        lastTxReport = millis();
-
-        const uint32_t txCount =
-            dbgTxDoneCount;
-
-        const uint32_t txBytes =
-            dbgTxBytes;
-
-        const uint32_t txPerSecond =
-            txCount - previousTxCount;
-
-        const uint32_t bytesPerSecond =
-            txBytes - previousTxBytes;
-
-        previousTxCount = txCount;
-        previousTxBytes = txBytes;
-
-        Serial.print("USB AUDIO TX/s=");
-        Serial.print(txPerSecond);
-
-        Serial.print(" bytes/s=");
-        Serial.print(bytesPerSecond);
-
-        Serial.print(" ep=0x");
-        Serial.print(dbgTxEndpoint, HEX);
-
-        Serial.print(" alt=");
-        Serial.println(dbgTxAlt);
-
-        Serial.print(" pre=");
-        Serial.print(dbgTxPreCount);
-
-        Serial.print(" preEP=0x");
-        Serial.print(dbgTxPreEndpoint, HEX);
-
-        Serial.print(" preAlt=");
-        Serial.print(dbgTxPreAlt);
-
-        Serial.print("  CORE entry=");
-        Serial.print(usb_audio_dbg_tx_entry);
-
-        Serial.print(" asFail=");
-        Serial.print(usb_audio_dbg_as_fail);
-
-        Serial.print(" altZero=");
-        Serial.print(usb_audio_dbg_alt_zero);
-
-        Serial.print(" preReached=");
-        Serial.print(usb_audio_dbg_pre_reached);
-
-        Serial.print(" ASitf=");
-        Serial.print(usb_audio_dbg_ep_in_as_itf);
-
-        Serial.print(" idx=");
-        Serial.print(usb_audio_dbg_idx_itf);
-
-        Serial.print(" altVal=");
-        Serial.print(usb_audio_dbg_alt_value);
-
-        Serial.print(" coreEP=0x");
-        Serial.print(usb_audio_dbg_ep_in, HEX);
-
-        Serial.print(" epSeen=");
-        Serial.print(usb_audio_dbg_ep_seen);
-
-        Serial.print(" inMatch=");
-        Serial.print(usb_audio_dbg_ep_in_match);
-
-        Serial.print(" seenAddr=0x");
-        Serial.print(usb_audio_dbg_seen_ep_addr, HEX);
-
-        Serial.print(" dir=");
-        Serial.print(usb_audio_dbg_seen_ep_dir);
-
-        Serial.print(" usage=");
-        Serial.print(usb_audio_dbg_seen_ep_usage);
-
-        Serial.print(" xfer=");
-        Serial.print(usb_audio_dbg_seen_ep_attr);
-
-        Serial.print(" size=");
-        Serial.println(usb_audio_dbg_seen_ep_size);
-
-        Serial.print(" itfMatch=");
-        Serial.print(usb_audio_dbg_itf_match);
-
-        Serial.print(" reqItf=");
-        Serial.print(usb_audio_dbg_req_itf);
-
-        Serial.print(" reqAlt=");
-        Serial.print(usb_audio_dbg_req_alt);
-
-        Serial.print(" nEps=");
-        Serial.print(usb_audio_dbg_matched_eps);
-
-        Serial.print(" foundEps=");
-        Serial.println(usb_audio_dbg_found_eps);
-
-        Serial.print(" ALT1 match=");
-        Serial.print(usb_audio_dbg_alt1_match);
-
-        Serial.print(" itf=");
-        Serial.print(usb_audio_dbg_alt1_itf);
-
-        Serial.print(" nEps=");
-        Serial.print(usb_audio_dbg_alt1_n_eps);
-
-        Serial.print(" foundEps=");
-        Serial.println(usb_audio_dbg_alt1_found_eps);
-
-        Serial.print(" SETITF entry=");
-        Serial.print(usb_audio_dbg_setitf_entry);
-
-        Serial.print(" ALT1req=");
-        Serial.print(usb_audio_dbg_alt1_request);
-
-        Serial.print(" itf=");
-        Serial.print(usb_audio_dbg_alt1_request_itf);
-
-        Serial.print(" lookupOK=");
-        Serial.print(usb_audio_dbg_alt1_lookup_ok);
-
-        Serial.print(" lookupFAIL=");
-        Serial.println(usb_audio_dbg_alt1_lookup_fail);
-
-        Serial.print("ISO alloc=");
-        Serial.print(usb_audio_dbg_iso_alloc_count);
-
-        Serial.print(" ep=0x");
-        Serial.print(usb_audio_dbg_iso_alloc_ep, HEX);
-
-        Serial.print(" size=");
-        Serial.println(usb_audio_dbg_iso_alloc_size);
-
-
-        Serial.print("ISO activate=");
-        Serial.print(usb_audio_dbg_iso_activate_count);
-
-        Serial.print(" ep=0x");
-        Serial.print(usb_audio_dbg_iso_activate_ep, HEX);
-
-        Serial.print(" size=");
-        Serial.println(usb_audio_dbg_iso_activate_size);
-
-
-        Serial.print("DCD xfer=");
-        Serial.print(usb_audio_dbg_dcd_xfer_count);
-
-        Serial.print(" ep=0x");
-        Serial.print(usb_audio_dbg_dcd_xfer_ep, HEX);
-
-        Serial.print(" size=");
-        Serial.println(usb_audio_dbg_dcd_xfer_size);
-    }
-}
-
 
 // ============================================================
 // Write PCM Samples
@@ -581,6 +218,21 @@ size_t USBAudioClass::write(
         samples == nullptr ||
         sampleCount == 0
     ) {
+        return 0;
+    }
+
+    // --------------------------------------------------------
+    // Hold the USB mutex, like SerialUSB does.
+    //
+    // Arduino-Pico runs tud_task() from an IRQ. Without this
+    // lock, a SET_INTERFACE handled in that IRQ can call
+    // tu_fifo_clear() while we hold the FIFO write mutex
+    // here, and the IRQ blocks forever (whole chip freezes).
+    // --------------------------------------------------------
+
+    CoreMutex m(&USB.mutex, false);
+
+    if (!m) {
         return 0;
     }
 
@@ -599,6 +251,13 @@ size_t USBAudioClass::write(
             reinterpret_cast<const uint8_t *>(samples),
             bytes
         );
+
+    // While we hold USB.mutex the 1 ms USB IRQ skips tud_task().
+    // write() is usually called on the same 1 ms cadence, so the
+    // IRQ can keep landing here and the ISO IN endpoint is never
+    // re-armed (audio only got through when Serial ran tud_task).
+    // Service the stack ourselves, as SerialUSB does.
+    tud_task();
 
     return written /
            sizeof(int16_t);
@@ -623,17 +282,6 @@ bool tud_audio_get_req_entity_cb(
         static_cast<uint8_t>(
             request->wValue >> 8
         );
-
-    const uint8_t channelNumber =
-        static_cast<uint8_t>(
-            request->wValue & 0xFF
-        );
-
-    dbgGetEntity  = entityID;
-    dbgGetControl = controlSelector;
-    dbgGetChannel = channelNumber;
-    dbgGetRequest = request->bRequest;
-    dbgGetCount++;    
 
     // ========================================================
     // CLOCK SOURCE
@@ -689,8 +337,8 @@ bool tud_audio_get_req_entity_cb(
                     .wNumSubRanges = 1,
                     .subrange = {
                         {
-                            .bMin = 48000,
-                            .bMax = 48000,
+                            .bMin = CFG_TUD_AUDIO_FUNC_1_SAMPLE_RATE,
+                            .bMax = CFG_TUD_AUDIO_FUNC_1_SAMPLE_RATE,
                             .bRes = 0
                         }
                     }
@@ -739,9 +387,9 @@ bool tud_audio_get_req_entity_cb(
         return false;
     }
 
-// ========================================================
-// INPUT TERMINAL
-// ========================================================
+    // ========================================================
+    // INPUT TERMINAL
+    // ========================================================
 
     if (
         entityID ==
@@ -775,6 +423,7 @@ bool tud_audio_get_req_entity_cb(
 
         return false;
     }
+
     // ========================================================
     // FEATURE UNIT
     // ========================================================
@@ -894,6 +543,8 @@ bool tud_audio_set_req_entity_cb(
     uint8_t *buffer
 ) {
 
+    (void)rhport;
+
     const uint8_t entityID =
         static_cast<uint8_t>(
             request->wIndex >> 8
@@ -903,11 +554,6 @@ bool tud_audio_set_req_entity_cb(
         static_cast<uint8_t>(
             request->wValue >> 8
         );
-
-    dbgSetEntity  = entityID;
-    dbgSetControl = controlSelector;
-    dbgSetRequest = request->bRequest;
-    dbgSetCount++;
 
     // ========================================================
     // CLOCK SOURCE
@@ -933,10 +579,10 @@ bool tud_audio_set_req_entity_cb(
                         audio_control_cur_4_t *
                     >(buffer);
 
-                // We only support 48 kHz.
+                // Only the configured rate is supported.
                 if (
                     cur->bCur ==
-                    48000
+                    CFG_TUD_AUDIO_FUNC_1_SAMPLE_RATE
                 ) {
                     usbAudioSampleRate =
                         cur->bCur;
@@ -1022,62 +668,38 @@ bool tud_audio_set_req_entity_cb(
     return false;
 }
 
+
+// ============================================================
+// TinyUSB: Audio Streaming endpoint closed (alt -> 0)
+// ============================================================
+//
+// With TUP_DCD_EDPT_ISO_ALLOC the RP2040/RP2350 DCD never
+// closes the ISO endpoint on alt 0. The IN buffer armed while
+// alt was 1 stays AVAILABLE in hardware because the host stops
+// polling. On the next alt 1, TinyUSB arms it again and the DCD
+// calls panic("ep 81 was already available"), halting the chip.
+//
+// Windows does alt 1 -> alt 0 -> alt 1 as soon as the sound
+// settings page is opened, which is exactly when it froze.
+//
+// Disarm the hardware buffer here so the next transfer starts
+// from a clean state.
+//
+
 extern "C"
-bool tud_audio_set_itf_cb(
+bool tud_audio_set_itf_close_EP_cb(
     uint8_t rhport,
     tusb_control_request_t const *request
 ) {
-    (void) rhport;
-
-    const uint8_t interfaceNumber =
-        static_cast<uint8_t>(
-            request->wIndex & 0xFF
-        );
-
-    const uint8_t altSetting =
-        static_cast<uint8_t>(
-            request->wValue & 0xFF
-        );
-
-    dbgItf = interfaceNumber;
-    dbgAlt = altSetting;
-    dbgSetItfCount++;
-
-    return true;
-}
-
-extern "C"
-bool tud_audio_tx_done_pre_load_cb(
-    uint8_t rhport,
-    uint8_t func_id,
-    uint8_t ep_in,
-    uint8_t cur_alt_setting
-) {
     (void)rhport;
-    (void)func_id;
+    (void)request;
 
-    dbgTxPreCount++;
-    dbgTxPreEndpoint = ep_in;
-    dbgTxPreAlt = cur_alt_setting;
+    const uint8_t epNum =
+        USBAudio.endpointIn() & 0x0F;
 
-    return true;
-}
-
-extern "C"
-bool tud_audio_tx_done_post_load_cb(
-    uint8_t rhport,
-    uint16_t n_bytes_copied,
-    uint8_t func_id,
-    uint8_t ep_in,
-    uint8_t cur_alt_setting
-) {
-    (void)rhport;
-    (void)func_id;
-
-    dbgTxDoneCount++;
-    dbgTxBytes += n_bytes_copied;
-    dbgTxEndpoint = ep_in;
-    dbgTxAlt = cur_alt_setting;
+    if (epNum != 0) {
+        usb_dpram->ep_buf_ctrl[epNum].in = 0;
+    }
 
     return true;
 }
