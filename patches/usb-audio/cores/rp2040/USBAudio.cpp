@@ -7,6 +7,7 @@
 #include <tusb.h>
 #include <hardware/structs/usb_dpram.h>
 #include <cstring>
+#include <math.h>
 
 // ============================================================
 // UNIT Electronics USB Audio
@@ -37,10 +38,40 @@ USBAudioClass USBAudio;
 // USB Audio Runtime State
 // ============================================================
 
-// Single source of truth: tusb_config.h
-static uint32_t usbAudioSampleRate = CFG_TUD_AUDIO_FUNC_1_SAMPLE_RATE;
-static bool usbAudioMute = false;
-static int16_t usbAudioVolume = 0;
+// Rates offered to the host. Windows lists them under
+// Sound > Properties > Format. The highest one must match
+// CFG_TUD_AUDIO_FUNC_1_MAX_SAMPLE_RATE in tusb_config.h.
+static constexpr uint32_t usbAudioRates[] = {
+    16000,
+    24000,
+    44100,
+    48000
+};
+
+constexpr size_t usbAudioRateCount =
+    sizeof(usbAudioRates) / sizeof(usbAudioRates[0]);
+
+static_assert(
+    usbAudioRates[usbAudioRateCount - 1] ==
+    CFG_TUD_AUDIO_FUNC_1_MAX_SAMPLE_RATE,
+    "Highest USB audio rate must match tusb_config.h"
+);
+
+static volatile uint32_t usbAudioSampleRate = 48000;
+static volatile bool usbAudioRateChanged = false;
+static volatile bool usbAudioStreaming = false;
+
+// Input level set by the host (Windows: Sound > Microphone >
+// Input volume), applied in write(). Units: 1/256 dB.
+static constexpr int16_t usbAudioVolumeMin = -20 * 256;
+static constexpr int16_t usbAudioVolumeMax = 30 * 256;
+static constexpr int16_t usbAudioVolumeRes = 256;
+
+// Start at +10 dB: the host adopts this as the initial slider
+// position, which suits a voice at ~25 cm out of the box.
+static volatile bool usbAudioMute = false;
+static volatile int16_t usbAudioVolume = 10 * 256;
+static volatile int32_t usbAudioGainQ12 = 12953;  // 10^(10/20) * 4096
 
 
 // ============================================================
@@ -151,6 +182,35 @@ void USBAudioClass::descriptorCallback(
 
 
     // --------------------------------------------------------
+    // Make the clock programmable
+    // --------------------------------------------------------
+    //
+    // TinyUSB's template declares an internal FIXED clock with a
+    // read-only frequency. Windows then lists every rate from
+    // GET RANGE but never sends SET CUR, so only the rate that
+    // GET CUR reports can stream; the others fail to open.
+    //
+
+    for (size_t i = 0; i + 8 <= sizeof(descriptor); i += descriptor[i]) {
+
+        if (descriptor[i] == 0) {
+            break;
+        }
+
+        if (
+            descriptor[i + 1] == TUSB_DESC_CS_INTERFACE &&
+            descriptor[i + 2] == AUDIO_CS_AC_INTERFACE_CLOCK_SOURCE
+        ) {
+            descriptor[i + 4] = AUDIO_CLOCK_SOURCE_ATT_INT_PRO_CLK;
+            descriptor[i + 5] =
+                (AUDIO_CTRL_RW << AUDIO_CLOCK_SOURCE_CTRL_CLK_FRQ_POS) |
+                (AUDIO_CTRL_R << AUDIO_CLOCK_SOURCE_CTRL_CLK_VAL_POS);
+            break;
+        }
+    }
+
+
+    // --------------------------------------------------------
     // Safety check
     // --------------------------------------------------------
 
@@ -205,6 +265,24 @@ bool USBAudioClass::ready() {
 }
 
 
+bool USBAudioClass::streaming() {
+
+    return tud_mounted() && usbAudioStreaming;
+}
+
+
+bool USBAudioClass::muted() {
+
+    return usbAudioMute;
+}
+
+
+float USBAudioClass::volumeDb() {
+
+    return usbAudioVolume / 256.0f;
+}
+
+
 // ============================================================
 // Write PCM Samples
 // ============================================================
@@ -240,17 +318,59 @@ size_t USBAudioClass::write(
         return 0;
     }
 
-    const uint16_t bytes =
-        static_cast<uint16_t>(
-            sampleCount *
-            sizeof(int16_t)
-        );
+    const int32_t gain =
+        usbAudioMute ? 0 : usbAudioGainQ12;
 
-    const uint16_t written =
-        tud_audio_write(
-            reinterpret_cast<const uint8_t *>(samples),
-            bytes
-        );
+    size_t written = 0;
+
+    if (gain == 4096) {
+
+        written =
+            tud_audio_write(
+                reinterpret_cast<const uint8_t *>(samples),
+                static_cast<uint16_t>(sampleCount * sizeof(int16_t))
+            );
+
+    } else {
+
+        // Apply the host's input volume, saturating at full scale
+        int16_t chunk[64];
+
+        while (written < sampleCount * sizeof(int16_t)) {
+
+            const size_t offset = written / sizeof(int16_t);
+            size_t n = sampleCount - offset;
+
+            if (n > 64) {
+                n = 64;
+            }
+
+            for (size_t i = 0; i < n; i++) {
+
+                int32_t v = (samples[offset + i] * gain + 2048) >> 12;
+
+                if (v > 32767) {
+                    v = 32767;
+                } else if (v < -32768) {
+                    v = -32768;
+                }
+
+                chunk[i] = static_cast<int16_t>(v);
+            }
+
+            const uint16_t w =
+                tud_audio_write(
+                    reinterpret_cast<const uint8_t *>(chunk),
+                    static_cast<uint16_t>(n * sizeof(int16_t))
+                );
+
+            written += w;
+
+            if (w < n * sizeof(int16_t)) {
+                break;
+            }
+        }
+    }
 
     // While we hold USB.mutex the 1 ms USB IRQ skips tud_task().
     // write() is usually called on the same 1 ms cadence, so the
@@ -261,6 +381,61 @@ size_t USBAudioClass::write(
 
     return written /
            sizeof(int16_t);
+}
+
+size_t USBAudioClass::availableForWrite() {
+
+    if (!tud_mounted()) {
+        return 0;
+    }
+
+    return tu_fifo_remaining(
+               tud_audio_get_ep_in_ff()
+           ) /
+           sizeof(int16_t);
+}
+
+size_t USBAudioClass::queued() {
+
+    if (!tud_mounted()) {
+        return 0;
+    }
+
+    return tu_fifo_count(
+               tud_audio_get_ep_in_ff()
+           ) /
+           sizeof(int16_t);
+}
+
+size_t USBAudioClass::bufferSize() {
+
+    return tu_fifo_depth(
+               tud_audio_get_ep_in_ff()
+           ) /
+           sizeof(int16_t);
+}
+
+uint32_t USBAudioClass::sampleRate() {
+    return usbAudioSampleRate;
+}
+
+bool USBAudioClass::sampleRateChanged() {
+
+    if (!usbAudioRateChanged) {
+        return false;
+    }
+
+    usbAudioRateChanged = false;
+    return true;
+}
+
+void USBAudioClass::task() {
+
+    CoreMutex m(&USB.mutex, false);
+
+    if (m) {
+        tud_task();
+    }
 }
 
 // ============================================================
@@ -333,16 +508,16 @@ bool tud_audio_get_req_entity_cb(
                 AUDIO_CS_REQ_RANGE
             ) {
 
-                audio_control_range_4_n_t(1) range = {
-                    .wNumSubRanges = 1,
-                    .subrange = {
-                        {
-                            .bMin = CFG_TUD_AUDIO_FUNC_1_SAMPLE_RATE,
-                            .bMax = CFG_TUD_AUDIO_FUNC_1_SAMPLE_RATE,
-                            .bRes = 0
-                        }
-                    }
-                };
+                // One discrete subrange per supported rate
+                audio_control_range_4_n_t(usbAudioRateCount) range;
+
+                range.wNumSubRanges = usbAudioRateCount;
+
+                for (size_t i = 0; i < usbAudioRateCount; i++) {
+                    range.subrange[i].bMin = static_cast<int32_t>(usbAudioRates[i]);
+                    range.subrange[i].bMax = static_cast<int32_t>(usbAudioRates[i]);
+                    range.subrange[i].bRes = 0;
+                }
 
                 return
                     tud_audio_buffer_and_schedule_control_xfer(
@@ -501,14 +676,9 @@ bool tud_audio_get_req_entity_cb(
                     .wNumSubRanges = 1,
                     .subrange = {
                         {
-                            // -90 dB
-                            .bMin = -90 * 256,
-
-                            // 0 dB
-                            .bMax = 0,
-
-                            // 1 dB steps
-                            .bRes = 1 * 256
+                            .bMin = usbAudioVolumeMin,
+                            .bMax = usbAudioVolumeMax,
+                            .bRes = usbAudioVolumeRes
                         }
                     }
                 };
@@ -579,15 +749,22 @@ bool tud_audio_set_req_entity_cb(
                         audio_control_cur_4_t *
                     >(buffer);
 
-                // Only the configured rate is supported.
-                if (
-                    cur->bCur ==
-                    CFG_TUD_AUDIO_FUNC_1_SAMPLE_RATE
-                ) {
-                    usbAudioSampleRate =
-                        cur->bCur;
+                const uint32_t rate =
+                    static_cast<uint32_t>(cur->bCur);
 
-                    return true;
+                for (size_t i = 0; i < usbAudioRateCount; i++) {
+
+                    if (rate == usbAudioRates[i]) {
+
+                        // Runs in the USB task (IRQ). Only flag it;
+                        // the sketch reconfigures its audio source.
+                        if (rate != usbAudioSampleRate) {
+                            usbAudioSampleRate = rate;
+                            usbAudioRateChanged = true;
+                        }
+
+                        return true;
+                    }
                 }
 
                 return false;
@@ -653,8 +830,17 @@ bool tud_audio_set_req_entity_cb(
                         audio_control_cur_2_t *
                     >(buffer);
 
-                usbAudioVolume =
-                    cur->bCur;
+                int16_t v = cur->bCur;
+
+                if (v < usbAudioVolumeMin) {
+                    v = usbAudioVolumeMin;
+                } else if (v > usbAudioVolumeMax) {
+                    v = usbAudioVolumeMax;
+                }
+
+                usbAudioVolume = v;
+                usbAudioGainQ12 =
+                    lroundf(4096.0f * powf(10.0f, v / (256.0f * 20.0f)));
 
                 return true;
             }
@@ -666,6 +852,24 @@ bool tud_audio_set_req_entity_cb(
 
 
     return false;
+}
+
+
+// ============================================================
+// TinyUSB: Audio Streaming interface opened (alt 1)
+// ============================================================
+
+extern "C"
+bool tud_audio_set_itf_cb(
+    uint8_t rhport,
+    tusb_control_request_t const *request
+) {
+    (void)rhport;
+
+    usbAudioStreaming =
+        TU_U16_LOW(request->wValue) != 0;
+
+    return true;
 }
 
 
@@ -693,6 +897,8 @@ bool tud_audio_set_itf_close_EP_cb(
 ) {
     (void)rhport;
     (void)request;
+
+    usbAudioStreaming = false;
 
     const uint8_t epNum =
         USBAudio.endpointIn() & 0x0F;
