@@ -99,13 +99,17 @@
 // UNIT Pulsar RP2350A USB Microphone
 //
 // Format:
-//   24 kHz
+//   24 kHz or 48 kHz, selected by the host (UAC2 clock source)
 //   16-bit PCM
 //   Mono
 //   Isochronous IN endpoint
 //
+// The supported rates live in cores/rp2040/USBAudio.cpp. Only the
+// highest one matters here: it sizes the endpoint and the FIFO,
+// which are compiled into lib/<cpu>/libpico.a.
+//
 
-#define CFG_TUD_AUDIO_FUNC_1_SAMPLE_RATE              (48000)
+#define CFG_TUD_AUDIO_FUNC_1_MAX_SAMPLE_RATE          (48000)
 
 #define CFG_TUD_AUDIO_ENABLE_EP_IN                    (1)
 
@@ -126,7 +130,7 @@
 #define CFG_TUD_AUDIO_FUNC_1_CTRL_BUF_SZ              (64)
 
 
-// 24 kHz x 2 bytes x 1 channel
+// 48 kHz x 2 bytes x 1 channel (+1 sample of margin) = 98 bytes
 //
 // TinyUSB version included in this core uses:
 //
@@ -138,7 +142,7 @@
 
 #define CFG_TUD_AUDIO_EP_SZ_IN \
     TUD_AUDIO_EP_SIZE( \
-        CFG_TUD_AUDIO_FUNC_1_SAMPLE_RATE, \
+        CFG_TUD_AUDIO_FUNC_1_MAX_SAMPLE_RATE, \
         CFG_TUD_AUDIO_FUNC_1_N_BYTES_PER_SAMPLE_TX, \
         CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_TX \
     )

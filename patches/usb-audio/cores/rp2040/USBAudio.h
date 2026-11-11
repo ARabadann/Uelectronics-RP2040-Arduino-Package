@@ -22,8 +22,6 @@ public:
 
     void begin();
 
-    void debugReport();
-
 
     // --------------------------------------------------------
     // USB State
@@ -31,6 +29,21 @@ public:
 
     bool mounted();
     bool ready();
+
+    // True while the host is recording (streaming interface open).
+    // When false nothing drains the FIFO, so producers can skip.
+    bool streaming();
+
+
+    // --------------------------------------------------------
+    // Input level chosen by the host (applied in write())
+    // --------------------------------------------------------
+
+    bool muted();
+
+    // -20 dB .. +30 dB, 0 dB = samples sent unchanged.
+    // Starts at +10 dB until the host sets its own level.
+    float volumeDb();
 
 
     // --------------------------------------------------------
@@ -42,14 +55,39 @@ public:
         size_t sampleCount
     );
 
+    // Samples that fit in the USB IN FIFO right now.
+    // The FIFO overwrites old data when full, so producers
+    // that run ahead of the host should check this first.
+    size_t availableForWrite();
+
+    // Samples waiting in the USB IN FIFO.
+    size_t queued();
+
+    // Total USB IN FIFO size in samples. TinyUSB's flow control
+    // sizes each packet to keep the FIFO about half full, so
+    // producers should aim for bufferSize() / 2 queued.
+    size_t bufferSize();
 
     // --------------------------------------------------------
-    // DEBUG
+    // Sample rate (16000, 24000, 44100 or 48000, chosen by the host)
     // --------------------------------------------------------
-    //
-    // Temporary accessors used to verify that the Audio
-    // interface is registered before USB initialization.
-    //
+
+    uint32_t sampleRate();
+
+    // True once after the host selected a different rate.
+    // Restart the audio source at sampleRate() when it fires.
+    bool sampleRateChanged();
+
+    // Service the USB stack now. The ISO IN packet for the next
+    // frame is only armed when tud_task() handles the previous
+    // completion; the core's 1 ms timer alone misses frames.
+    // Call this every loop() while streaming.
+    void task();
+
+
+    // --------------------------------------------------------
+    // USB resources assigned by the Arduino-Pico core
+    // --------------------------------------------------------
 
     uint8_t interfaceID() const {
         return _interfaceID;
