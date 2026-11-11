@@ -10,13 +10,28 @@ Version **3.0.0** introduces support for the **UNIT Pulsar RP2350A**, while main
 
 ---
 
+## What's New in 3.2.0
+
+- **USB microphone (Pulsar RP2350A):** no more freeze when Windows opens its
+  sound settings, continuous audio without clicks or gaps, sample rate chosen by
+  the computer (16, 24, 44.1 or 48 kHz) and input volume from the computer.
+- **PDM library:** the microphone clock check no longer rejects rates above
+  ~25 kHz, so PDM capture works up to 48 kHz. The decimation is also reset on
+  every `begin()`, so changing the sample rate works.
+- **UNIT_Pulsar library 1.3.0:** new `04_Microphone/USBMicrophone` and
+  `05_Recorder/VoiceRecorder` (records WAV files to the microSD card with the
+  BOOT button) examples.
+- **Pulsar RP2350A variant:** updated pin definitions.
+
+---
+
 ## Core Foundation
 
 This package is based on the **Arduino-Pico 6.0.0** core developed and maintained by **Earle F. Philhower III** and contributors.
 
 UNIT Electronics extends the upstream project with board definitions, pin mappings, memory configurations, and hardware-specific support for UNIT Electronics RP2040 and RP2350 boards.
 
-**UNIT Electronics Package:** 3.0.0  
+**UNIT Electronics Package:** 3.2.0  
 **Arduino-Pico Base:** 6.0.0
 
 For complete information about the underlying Arduino core:
@@ -319,4 +334,4 @@ We also acknowledge the work of the **Raspberry Pi**, **Arduino**, and broader o
 
 **UNIT Electronics — RP2040 / RP2350 Arduino Board Support Package**
 
-**Package Version 3.0.0 — Based on Arduino-Pico 6.0.0**
+**Package Version 3.2.0 — Based on Arduino-Pico 6.0.0**

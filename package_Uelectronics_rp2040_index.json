@@ -12,6 +12,85 @@
         {
           "category": "UNIT Electronics",
           "name": "UNIT Electronics RP2040/RP2350",
+          "url": "https://github.com/UNIT-Electronics/Uelectronics-RP2040-Arduino-Package/releases/download/v3.2.0/Uelectronics-rp2040_rp2350-3.2.0.zip",
+          "version": "3.2.0",
+          "architecture": "rp2040",
+          "archiveFileName": "Uelectronics-rp2040_rp2350-3.2.0.zip",
+          "boards": [
+            {
+              "name": "UNIT DualMCU RP2040"
+            },
+            {
+              "name": "UNIT DualMCU ONE"
+            },
+            {
+              "name": "UNIT Pulsar RP2350A"
+            },
+            {
+              "name": "Raspberry Pi Pico"
+            },
+            {
+              "name": "Raspberry Pi Pico W"
+            },
+            {
+              "name": "Raspberry Pi Pico 2"
+            },
+            {
+              "name": "Raspberry Pi Pico 2W"
+            },
+            {
+              "name": "Generic RP2040"
+            },
+            {
+              "name": "Generic RP2350"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "Uelectronics",
+              "version": "5.0.0-9576866",
+              "name": "pqt-gcc"
+            },
+            {
+              "packager": "Uelectronics",
+              "version": "5.0.0-9576866",
+              "name": "pqt-gcc-riscv"
+            },
+            {
+              "packager": "Uelectronics",
+              "version": "5.0.0-9576866",
+              "name": "pqt-mklittlefs"
+            },
+            {
+              "packager": "Uelectronics",
+              "version": "5.0.0-9576866",
+              "name": "pqt-pioasm"
+            },
+            {
+              "packager": "Uelectronics",
+              "version": "1.0.1-base-3a57aed-1",
+              "name": "pqt-python3"
+            },
+            {
+              "packager": "Uelectronics",
+              "version": "5.0.0-9576866",
+              "name": "pqt-openocd"
+            },
+            {
+              "packager": "Uelectronics",
+              "version": "5.0.0-9576866",
+              "name": "pqt-picotool"
+            }
+          ],
+          "help": {
+            "online": ""
+          },
+          "size": "125621998",
+          "checksum": "SHA-256:e05e18a0cbfec3bc610b5c2b7ca323e4521ed2481a987a59c537dc562345aa71"
+        },
+        {
+          "category": "UNIT Electronics",
+          "name": "UNIT Electronics RP2040/RP2350",
           "url": "https://github.com/UNIT-Electronics/Uelectronics-RP2040-Arduino-Package/releases/download/v3.1.0/Uelectronics-rp2040_rp2350-3.1.0.zip",
           "version": "3.1.0",
           "architecture": "rp2040",
