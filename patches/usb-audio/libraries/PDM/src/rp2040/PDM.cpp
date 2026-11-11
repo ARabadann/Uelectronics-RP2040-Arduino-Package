@@ -1,4 +1,10 @@
-
+/*
+    Modified 2026 by Adrián Rabadán Ortiz (UNIT Electronics):
+    the microphone clock check compared sampleRate * decimation * 2 (the
+    PIO rate) against the 3.25 MHz mic limit, but the clock on the CLK pin
+    is sampleRate * decimation. The decimation is also reset on every
+    begin(), so changing the sample rate works.
+*/
 
 #include "Arduino.h"
 #include "PDM.h"

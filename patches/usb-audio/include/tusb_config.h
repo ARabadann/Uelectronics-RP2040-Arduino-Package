@@ -3,6 +3,9 @@
  *
  * Copyright (c) 2019 Ha Thach (tinyusb.org)
  *
+ * Modified 2026 by Adrián Rabadán Ortiz (UNIT Electronics): enables the
+ * USB Audio class (CFG_TUD_AUDIO) and sizes its endpoint for 48 kHz.
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights

@@ -12,6 +12,11 @@
 
   Arduino-Pico SDIO uses CLK, CMD, and DAT0.
   DAT1..DAT3 must be connected consecutively after DAT0.
+
+  Author: Adrián Rabadán Ortiz
+  Copyright (c) 2026 UNIT Electronics
+  Released under the MIT License: you may copy, modify and use
+  this example in your own projects, commercial or not.
 */
 
 #ifndef ARDUINO_UNIT_PULSAR_RP2350A

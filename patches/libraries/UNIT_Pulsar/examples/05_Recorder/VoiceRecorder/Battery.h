@@ -1,3 +1,13 @@
+/*
+  UNIT Electronics - Pulsar RP2350A
+  Voice Recorder: Battery.h
+
+  Author: Adrián Rabadán Ortiz
+  Copyright (c) 2026 UNIT Electronics
+  Released under the MIT License: you may copy, modify and use
+  this example in your own projects, commercial or not.
+*/
+
 #pragma once
 
 // ============================================================

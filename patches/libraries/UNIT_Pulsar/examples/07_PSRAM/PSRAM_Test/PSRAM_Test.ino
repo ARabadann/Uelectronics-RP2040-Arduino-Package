@@ -5,6 +5,11 @@
   External PSRAM:
   APS6404L-3SQR-ZR
   CS -> GPIO0
+
+  Author: Adrián Rabadán Ortiz
+  Copyright (c) 2026 UNIT Electronics
+  Released under the MIT License: you may copy, modify and use
+  this example in your own projects, commercial or not.
 */
 
 #ifndef ARDUINO_UNIT_PULSAR_RP2350A
